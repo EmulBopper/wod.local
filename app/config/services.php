@@ -1,17 +1,19 @@
 <?php
-/**
- * Services are globally registered in this file
- *
- * @var \Phalcon\Config $config
- */
-
-use Phalcon\Di\FactoryDefault;
+use Phalcon\DI\FactoryDefault;
 use Phalcon\Mvc\View;
+use Phalcon\Crypt;
+use Phalcon\Mvc\Dispatcher;
 use Phalcon\Mvc\Url as UrlResolver;
+use Phalcon\Db\Adapter\Pdo\Mysql as DbAdapter;
 use Phalcon\Mvc\View\Engine\Volt as VoltEngine;
-use Phalcon\Mvc\Model\Metadata\Memory as MetaDataAdapter;
+use Phalcon\Mvc\Model\Metadata\Files as MetaDataAdapter;
 use Phalcon\Session\Adapter\Files as SessionAdapter;
 use Phalcon\Flash\Direct as Flash;
+use Phalcon\Logger\Adapter\File as FileLogger;
+use Phalcon\Logger\Formatter\Line as FormatterLine;
+use Wod\Auth\Auth;
+use Wod\Acl\Acl;
+use Wod\Mail\Mail;
 
 /**
  * The FactoryDefault Dependency Injector automatically register the right services providing a full stack framework
@@ -19,19 +21,23 @@ use Phalcon\Flash\Direct as Flash;
 $di = new FactoryDefault();
 
 /**
+ * Register the global configuration as config
+ */
+$di->set('config', $config);
+
+/**
  * The URL component is used to generate all kind of urls in the application
  */
-$di->setShared('url', function () use ($config) {
+$di->set('url', function () use ($config) {
     $url = new UrlResolver();
     $url->setBaseUri($config->application->baseUri);
-
     return $url;
-});
+}, true);
 
 /**
  * Setting up the view component
  */
-$di->setShared('view', function () use ($config) {
+$di->set('view', function () use ($config) {
 
     $view = new View();
 
@@ -43,56 +49,118 @@ $di->setShared('view', function () use ($config) {
             $volt = new VoltEngine($view, $di);
 
             $volt->setOptions(array(
-                'compiledPath' => $config->application->cacheDir,
+                'compiledPath' => $config->application->cacheDir . 'volt/',
                 'compiledSeparator' => '_'
             ));
 
             return $volt;
-        },
-        '.phtml' => 'Phalcon\Mvc\View\Engine\Php'
+        }
     ));
 
     return $view;
-});
+}, true);
 
 /**
  * Database connection is created based in the parameters defined in the configuration file
  */
-$di->setShared('db', function () use ($config) {
-    $dbConfig = $config->database->toArray();
-    $adapter = $dbConfig['adapter'];
-    unset($dbConfig['adapter']);
-
-    $class = 'Phalcon\Db\Adapter\Pdo\\' . $adapter;
-
-    return new $class($dbConfig);
+$di->set('db', function () use ($config) {
+    return new DbAdapter(array(
+        'host' => $config->database->host,
+        'username' => $config->database->username,
+        'password' => $config->database->password,
+        'dbname' => $config->database->dbname
+    ));
 });
 
 /**
  * If the configuration specify the use of metadata adapter use it or use memory otherwise
  */
-$di->setShared('modelsMetadata', function () {
-    return new MetaDataAdapter();
-});
-
-/**
- * Register the session flash service with the Twitter Bootstrap classes
- */
-$di->set('flash', function () {
-    return new Flash(array(
-        'error'   => 'alert alert-danger',
-        'success' => 'alert alert-success',
-        'notice'  => 'alert alert-info',
-        'warning' => 'alert alert-warning'
+$di->set('modelsMetadata', function () use ($config) {
+    return new MetaDataAdapter(array(
+        'metaDataDir' => $config->application->cacheDir . 'metaData/'
     ));
 });
 
 /**
  * Start the session the first time some component request the session service
  */
-$di->setShared('session', function () {
+$di->set('session', function () {
     $session = new SessionAdapter();
     $session->start();
-
     return $session;
+});
+
+/**
+ * Crypt service
+ */
+$di->set('crypt', function () use ($config) {
+    $crypt = new Crypt();
+    $crypt->setKey($config->application->cryptSalt);
+    return $crypt;
+});
+
+/**
+ * Dispatcher use a default namespace
+ */
+$di->set('dispatcher', function () {
+    $dispatcher = new Dispatcher();
+    $dispatcher->setDefaultNamespace('Wod\Controllers');
+    return $dispatcher;
+});
+
+/**
+ * Loading routes from the routes.php file
+ */
+$di->set('router', function () {
+    return require __DIR__ . '/routes.php';
+});
+
+/**
+ * Flash service with custom CSS classes
+ */
+$di->set('flash', function () {
+    return new Flash(array(
+        'error' => 'alert alert-danger',
+        'success' => 'alert alert-success',
+        'notice' => 'alert alert-info',
+        'warning' => 'alert alert-warning'
+    ));
+});
+
+/**
+ * Custom authentication component
+ */
+$di->set('auth', function () {
+    return new Auth();
+});
+
+/**
+ * Mail service uses AmazonSES
+ */
+$di->set('mail', function () {
+    return new Mail();
+});
+
+/**
+ * Access Control List
+ */
+$di->set('acl', function () {
+    return new Acl();
+});
+
+/**
+ * Logger service
+ */
+$di->set('logger', function ($filename = null, $format = null) use ($config) {
+    $format   = $format ?: $config->get('logger')->format;
+    $filename = trim($filename ?: $config->get('logger')->filename, '\\/');
+    $path     = rtrim($config->get('logger')->path, '\\/') . DIRECTORY_SEPARATOR;
+
+    $formatter = new FormatterLine($format, $config->get('logger')->date);
+    $logger    = new FileLogger($path . $filename);
+
+    $logger->setFormatter($formatter);
+    $logger->setLogLevel($config->get('logger')->logLevel);
+
+    return $logger;
 });
