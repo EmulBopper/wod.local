@@ -119,15 +119,15 @@ class Users extends Model
     /**
      * Validate that emails are unique across users
      */
-   // public function validation()
-   // {
-   //     $this->validate(new Uniqueness(array(
-   //         "field" => "email",
-   //         "message" => "The email is already registered"
-   //     )));
+    public function validation()
+    {
+        $this->validate(new Uniqueness(array(
+            "field" => "email",
+            "message" => "The email is already registered"
+        )));
 
-   //        return $this->validationHasFailed() != true;
-   // }
+           return $this->validationHasFailed() != true;
+    }
 
     public function initialize()
     {
